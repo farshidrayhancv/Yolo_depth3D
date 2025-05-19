@@ -11,7 +11,7 @@ class DepthEstimator:
     """
     Depth estimation using Depth Anything v2
     """
-    def __init__(self, model_size='small', model_path=None, device=None):
+    def __init__(self, model_size='small', model_path=None, device=None, image_size=None):
         """
         Initialize the depth estimator
         
@@ -19,6 +19,7 @@ class DepthEstimator:
             model_size (str): Model size ('small', 'base', 'large')
             model_path (str): Direct path to a custom depth model (takes precedence over model_size)
             device (str): Device to run inference on ('cuda', 'cpu', 'mps')
+            image_size (list|tuple|int): Image size for processing [width, height] or single int value
         """
         # Determine device
         if device is None:
@@ -40,6 +41,11 @@ class DepthEstimator:
             print("Forcing CPU for depth estimation pipeline due to MPS compatibility issues")
         else:
             self.pipe_device = self.device
+        
+        # Store image size configuration
+        self.image_size = image_size
+        if image_size:
+            print(f"Using image size: {image_size} for depth estimation")
         
         print(f"Using device: {self.device} for depth estimation (pipeline on {self.pipe_device})")
         
@@ -85,8 +91,30 @@ class DepthEstimator:
         # Convert BGR to RGB
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        # Convert to PIL Image
-        pil_image = Image.fromarray(image_rgb)
+        # If image_size is specified, resize image before depth estimation
+        if self.image_size is not None:
+            # Determine new size
+            if isinstance(self.image_size, (list, tuple)):
+                new_width, new_height = self.image_size
+            else:
+                # If single integer, use it as the max dimension and maintain aspect ratio
+                height, width = image_rgb.shape[:2]
+                factor = self.image_size / max(height, width)
+                new_width = int(width * factor)
+                new_height = int(height * factor)
+            
+            # Resize the image
+            image_rgb_resized = cv2.resize(image_rgb, (new_width, new_height))
+            
+            # Convert to PIL Image for pipeline
+            pil_image = Image.fromarray(image_rgb_resized)
+            
+            # Store original dimensions for later resizing
+            original_height, original_width = image_rgb.shape[:2]
+        else:
+            # Use original image
+            pil_image = Image.fromarray(image_rgb)
+            original_height, original_width = None, None
         
         # Get depth map
         try:
@@ -98,6 +126,11 @@ class DepthEstimator:
                 depth_map = np.array(depth_map)
             elif isinstance(depth_map, torch.Tensor):
                 depth_map = depth_map.cpu().numpy()
+                
+            # If we resized for processing, resize depth map back to original size
+            if self.image_size is not None and original_height is not None and original_width is not None:
+                depth_map = cv2.resize(depth_map, (original_width, original_height))
+                
         except RuntimeError as e:
             # Handle potential MPS errors during inference
             if self.device == 'mps':
@@ -113,6 +146,10 @@ class DepthEstimator:
                     depth_map = np.array(depth_map)
                 elif isinstance(depth_map, torch.Tensor):
                     depth_map = depth_map.cpu().numpy()
+                
+                # If we resized for processing, resize depth map back to original size
+                if self.image_size is not None and original_height is not None and original_width is not None:
+                    depth_map = cv2.resize(depth_map, (original_width, original_height))
             else:
                 # Re-raise the error if not MPS
                 raise

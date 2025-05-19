@@ -23,6 +23,19 @@ detection:
   conf_threshold: 0.25  # Confidence threshold for object detection
   iou_threshold: 0.45  # IoU threshold for NMS
   classes: null  # Filter by class IDs, null for all classes
+  image_size: [1088, 1088]  # Image processing size [width, height] for detection model
+
+# Depth settings
+depth:
+  image_size: [640, 640]  # Image processing size [width, height] for depth model
+
+# Tracking settings
+tracking:
+  track_thresh: 0.25  # Detection threshold for tracking
+  track_buffer: 30  # How many frames to keep in the buffer
+  match_thresh: 0.8  # IoU matching threshold for tracking
+  filter_config:
+    length: 5  # The maximum number of frames to consider for smoothing detections
 
 # Feature toggles
 features:
@@ -44,3 +57,4 @@ camera:
 # Processing settings
 processing:
   skip_frames: 0  # Number of frames to skip between processing (0 to process all frames)
+  show_progress: true  # Show progress bar during processing

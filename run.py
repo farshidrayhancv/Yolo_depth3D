@@ -8,6 +8,7 @@ import torch
 import argparse
 import yaml
 from pathlib import Path
+from tqdm import tqdm
 
 # Set MPS fallback for operations not supported on Apple Silicon
 if hasattr(torch, 'backends') and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
@@ -19,9 +20,6 @@ from depth_model import DepthEstimator
 from bbox3d_utils import BBox3DEstimator, BirdEyeView
 from load_camera_params import load_camera_params, apply_camera_params_to_estimator
 from segmentation_model import SegmentationModel
-
-# Import supervision for visualization
-import supervision as sv
 
 def load_config(config_path):
     """
@@ -66,12 +64,13 @@ def main():
     # Input/Output
     source = args.source  # Path to input video file or webcam index (0 for default camera)
     output_path = args.output  # Path to output video file
-    skip_frames = args.skip_frames  # Number of frames to skip between processing
+    skip_frames = args.skip_frames or config.get('processing', {}).get('skip_frames', 0)
+    show_progress = config.get('processing', {}).get('show_progress', True)
     
     # Model settings - can be overridden by config.yaml
-    yolo_model_size = config.get('models', {}).get('yolo_size', "nano")  # YOLOv11 model size: "nano", "small", "medium", "large", "extra"
-    depth_model_size = config.get('models', {}).get('depth_size', "small")  # Depth Anything v2 model size: "small", "base", "large"
-    sam_model_size = config.get('models', {}).get('sam_size', "base")  # SAM model size: "base", "large"
+    yolo_model_size = config.get('models', {}).get('yolo_size', "nano")
+    depth_model_size = config.get('models', {}).get('depth_size', "small")
+    sam_model_size = config.get('models', {}).get('sam_size', "base")
     
     # Extract model paths from config
     yolo_model_path = config.get('models', {}).get('yolo_path', None)
@@ -82,25 +81,33 @@ def main():
     device = config.get('device', 'cuda')  
     
     # Detection settings
-    conf_threshold = config.get('detection', {}).get('conf_threshold', 0.25)  # Confidence threshold for object detection
-    iou_threshold = config.get('detection', {}).get('iou_threshold', 0.45)  # IoU threshold for NMS
-    classes = config.get('detection', {}).get('classes', None)  # Filter by class, e.g., [0, 1, 2] for specific classes, None for all classes
+    conf_threshold = config.get('detection', {}).get('conf_threshold', 0.25)
+    iou_threshold = config.get('detection', {}).get('iou_threshold', 0.45)
+    classes = config.get('detection', {}).get('classes', None)
+    
+    # Image sizes
+    detection_image_size = config.get('detection', {}).get('image_size', None)
+    depth_image_size = config.get('depth', {}).get('image_size', None)
+    
+    # Tracking settings
+    tracking_config = config.get('tracking', {})
     
     # Feature toggles
-    enable_tracking = config.get('features', {}).get('tracking', True)  # Enable object tracking
-    enable_bev = config.get('features', {}).get('bev', False)  # Enable Bird's Eye View visualization
-    enable_pseudo_3d = config.get('features', {}).get('pseudo_3d', True)  # Enable pseudo-3D visualization
-    enable_sam = not args.no_sam and config.get('features', {}).get('sam', True)  # Enable SAM segmentation
+    enable_tracking = config.get('features', {}).get('tracking', True)
+    enable_bev = config.get('features', {}).get('bev', False)
+    enable_pseudo_3d = config.get('features', {}).get('pseudo_3d', True)
+    enable_sam = not args.no_sam and config.get('features', {}).get('sam', True)
     
     # Visualization settings
-    enable_visualization = config.get('visualization', {}).get('enable', False)  # Disable visualization by default
+    enable_visualization = config.get('visualization', {}).get('enable', False)
     
     # Camera parameters
-    camera_params_file = config.get('camera', {}).get('params_file', None)  # Path to camera parameters file
+    camera_params_file = config.get('camera', {}).get('params_file', None)
     # ===============================================
     
     print(f"Using device: {device}")
     print(f"Model paths from config: YOLO={yolo_model_path}, Depth={depth_model_path}, SAM={sam_model_path}")
+    print(f"Image sizes: Detection={detection_image_size}, Depth={depth_image_size}")
     
     # Initialize models
     print("Initializing models...")
@@ -111,7 +118,9 @@ def main():
             conf_thres=conf_threshold,
             iou_thres=iou_threshold,
             classes=classes,
-            device=device
+            device=device,
+            image_size=detection_image_size,
+            tracking_config=tracking_config
         )
     except Exception as e:
         print(f"Error initializing object detector: {e}")
@@ -122,14 +131,17 @@ def main():
             conf_thres=conf_threshold,
             iou_thres=iou_threshold,
             classes=classes,
-            device='cpu'
+            device='cpu',
+            image_size=detection_image_size,
+            tracking_config=tracking_config
         )
     
     try:
         depth_estimator = DepthEstimator(
             model_size=depth_model_size,
             model_path=depth_model_path,
-            device=device
+            device=device,
+            image_size=depth_image_size
         )
     except Exception as e:
         print(f"Error initializing depth estimator: {e}")
@@ -137,7 +149,8 @@ def main():
         depth_estimator = DepthEstimator(
             model_size=depth_model_size,
             model_path=depth_model_path,
-            device='cpu'
+            device='cpu',
+            image_size=depth_image_size
         )
     
     # Initialize SAM model if enabled
@@ -192,6 +205,11 @@ def main():
     if fps == 0:  # Sometimes happens with webcams
         fps = 30
     
+    # Get total frame count for progress bar
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames <= 0:  # Webcam or unknown
+        total_frames = None
+    
     # Initialize video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
@@ -202,6 +220,13 @@ def main():
     fps_display = "FPS: --"
     
     print("Starting processing...")
+    
+    # Create progress bar
+    if show_progress:
+        if total_frames:
+            progress_bar = tqdm(total=total_frames, desc="Processing frames", unit="frame")
+        else:
+            progress_bar = tqdm(desc="Processing frames", unit="frame")
     
     # Main loop
     while True:
@@ -217,6 +242,10 @@ def main():
             ret, frame = cap.read()
             if not ret:
                 break
+            
+            # Update progress bar
+            if show_progress:
+                progress_bar.update(1)
             
             # Skip frames if specified
             if skip_frames > 0 and (frame_count % (skip_frames + 1) != 0):
@@ -452,6 +481,10 @@ def main():
                     print("Exiting program...")
                     break
             continue
+    
+    # Close the progress bar
+    if show_progress:
+        progress_bar.close()
     
     # Clean up
     print("Cleaning up resources...")
