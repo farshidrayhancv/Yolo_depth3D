@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import cv2
+from transformers import AutoImageProcessor
 from transformers import pipeline
 from PIL import Image
 
@@ -68,7 +69,8 @@ class DepthEstimator:
         
         # Create pipeline
         try:
-            self.pipe = pipeline(task="depth-estimation", model=model_name, device=self.pipe_device, use_fast=True)
+            processor = AutoImageProcessor.from_pretrained(model_name, use_fast=True)
+            self.pipe = pipeline(task="depth-estimation", model=model_name, device=self.pipe_device, image_processor=processor)
             print(f"Loaded depth model on {self.pipe_device}")
         except Exception as e:
             # Fallback to CPU if there are issues
