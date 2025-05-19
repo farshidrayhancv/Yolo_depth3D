@@ -89,9 +89,9 @@ class ObjectDetector:
         
         # Initialize ByteTracker configuration
         self.tracker = sv.ByteTrack(
-            track_thresh=self.tracking_config.get('track_thresh', 0.25),
-            track_buffer=self.tracking_config.get('track_buffer', 30),
-            match_thresh=self.tracking_config.get('match_thresh', 0.8),
+            lost_track_buffer=self.tracking_config.get('lost_track_buffer', 0.25),
+            track_activation_threshold=self.tracking_config.get('track_activation_threshold', 30),
+            minimum_matching_threshold=self.tracking_config.get('minimum_matching_threshold', 0.8),
         )
 
         
@@ -172,7 +172,7 @@ class ObjectDetector:
             sv_detections = self.tracker.update_with_detections(sv_detections)
             
             # Apply smoothing to tracked objects
-            sv_detections = self.smoother.update(sv_detections)
+            sv_detections = self.smoother.update_with_detections(sv_detections)
             
             # Convert back to our format
             for i in range(len(sv_detections.xyxy)):

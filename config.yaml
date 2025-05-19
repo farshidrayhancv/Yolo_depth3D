@@ -31,9 +31,9 @@ depth:
 
 # Tracking settings
 tracking:
-  track_thresh: 0.25  # Detection threshold for tracking
-  track_buffer: 30  # How many frames to keep in the buffer
-  match_thresh: 0.8  # IoU matching threshold for tracking
+  lost_track_buffer: 0.25  # Detection threshold for tracking
+  track_activation_threshold: 30  # How many frames to keep in the buffer
+  minimum_matching_threshold: 0.8  # IoU matching threshold for tracking
   filter_config:
     length: 5  # The maximum number of frames to consider for smoothing detections
 
