@@ -9,12 +9,13 @@ class ObjectDetector:
     """
     Object detection using YOLOv11 from Ultralytics
     """
-    def __init__(self, model_size='small', conf_thres=0.25, iou_thres=0.45, classes=None, device=None):
+    def __init__(self, model_size='small', model_path=None, conf_thres=0.25, iou_thres=0.45, classes=None, device=None):
         """
         Initialize the object detector
         
         Args:
             model_size (str): Model size ('nano', 'small', 'medium', 'large', 'extra')
+            model_path (str): Direct path to a .pt model file (takes precedence over model_size)
             conf_thres (float): Confidence threshold for detections
             iou_thres (float): IoU threshold for NMS
             classes (list): List of classes to detect (None for all classes)
@@ -47,15 +48,21 @@ class ObjectDetector:
             'extra': 'yolo11x'
         }
         
-        model_name = model_map.get(model_size.lower(), model_map['small'])
-        
         # Load model
         try:
-            self.model = YOLO(model_name)
-            print(f"Loaded YOLOv11 {model_size} model on {self.device}")
+            if model_path and os.path.exists(model_path):
+                self.model = YOLO(model_path)
+                print(f"Loaded YOLOv11 model from {model_path} on {self.device}")
+            else:
+                if model_path:
+                    print(f"Warning: Model path {model_path} not found, falling back to default model")
+                model_name = model_map.get(model_size.lower(), model_map['small'])
+                self.model = YOLO(model_name)
+                print(f"Loaded YOLOv11 {model_size} model on {self.device}")
         except Exception as e:
             print(f"Error loading model: {e}")
             print("Trying to load with default settings...")
+            model_name = model_map.get(model_size.lower(), model_map['small'])
             self.model = YOLO(model_name)
         
         # Set model parameters
@@ -240,4 +247,4 @@ class ObjectDetector:
         Returns:
             list: List of class names
         """
-        return self.model.names 
+        return self.model.names

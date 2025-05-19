@@ -11,12 +11,13 @@ class DepthEstimator:
     """
     Depth estimation using Depth Anything v2
     """
-    def __init__(self, model_size='small', device=None):
+    def __init__(self, model_size='small', model_path=None, device=None):
         """
         Initialize the depth estimator
         
         Args:
             model_size (str): Model size ('small', 'base', 'large')
+            model_path (str): Direct path to a custom depth model (takes precedence over model_size)
             device (str): Device to run inference on ('cuda', 'cpu', 'mps')
         """
         # Determine device
@@ -49,19 +50,27 @@ class DepthEstimator:
             'large': 'depth-anything/Depth-Anything-V2-Large-hf'
         }
         
-        model_name = model_map.get(model_size.lower(), model_map['small'])
+        # Determine which model to use
+        if model_path and os.path.exists(model_path):
+            model_name = model_path
+            print(f"Using custom depth model from: {model_path}")
+        else:
+            if model_path:
+                print(f"Warning: Model path {model_path} not found, falling back to default model")
+            model_name = model_map.get(model_size.lower(), model_map['small'])
+            print(f"Using standard Depth Anything v2 {model_size} model")
         
         # Create pipeline
         try:
             self.pipe = pipeline(task="depth-estimation", model=model_name, device=self.pipe_device)
-            print(f"Loaded Depth Anything v2 {model_size} model on {self.pipe_device}")
+            print(f"Loaded depth model on {self.pipe_device}")
         except Exception as e:
             # Fallback to CPU if there are issues
             print(f"Error loading model on {self.pipe_device}: {e}")
             print("Falling back to CPU for depth estimation")
             self.pipe_device = 'cpu'
             self.pipe = pipeline(task="depth-estimation", model=model_name, device=self.pipe_device)
-            print(f"Loaded Depth Anything v2 {model_size} model on CPU (fallback)")
+            print(f"Loaded depth model on CPU (fallback)")
     
     def estimate_depth(self, image):
         """
@@ -181,4 +190,4 @@ class DepthEstimator:
         elif method == 'min':
             return float(np.min(region))
         else:
-            return float(np.median(region)) 
+            return float(np.median(region))

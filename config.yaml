@@ -1,0 +1,46 @@
+# YOLO-3D Configuration
+# This configuration file allows you to customize model paths and settings
+
+# Model configuration
+models:
+  # YOLO detector settings
+  yolo_size: "nano"  # Model size if path not provided (options: nano, small, medium, large, extra)
+  yolo_path: "models/1024_1024_mosaic pre.pt"  # Path to the custom YOLO model file
+  
+  # Depth estimation settings
+  depth_size: "small"  # Model size if path not provided (options: small, base, large)
+  depth_path: "models/depth_anything.pt"  # Path to the custom depth model file
+  
+  # SAM segmentation settings
+  sam_size: "base"  # Model size if path not provided (options: base, large)
+  sam_path: "models/sam_b.pt"  # Path to the custom SAM model file
+
+# Device settings
+device: "cuda"  # Use CUDA by default (options: cuda, cpu, mps)
+
+# Detection settings
+detection:
+  conf_threshold: 0.25  # Confidence threshold for object detection
+  iou_threshold: 0.45  # IoU threshold for NMS
+  classes: null  # Filter by class IDs, null for all classes
+
+# Feature toggles
+features:
+  tracking: true  # Enable object tracking
+  bev: false  # Enable Bird's Eye View visualization
+  pseudo_3d: true  # Enable pseudo-3D visualization
+  sam: true  # Enable SAM segmentation
+
+# Visualization settings
+visualization:
+  enable: false  # Disable OpenCV visualization by default
+  depth_map: false  # Show depth map window
+  detection: false  # Show detection frame window
+
+# Camera settings
+camera:
+  params_file: null  # Path to camera parameters file (null to use default parameters)
+
+# Processing settings
+processing:
+  skip_frames: 0  # Number of frames to skip between processing (0 to process all frames)

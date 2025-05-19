@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import torch
 import argparse
+import yaml
 from pathlib import Path
 
 # Set MPS fallback for operations not supported on Apple Silicon
@@ -17,20 +18,47 @@ from detection_model import ObjectDetector
 from depth_model import DepthEstimator
 from bbox3d_utils import BBox3DEstimator, BirdEyeView
 from load_camera_params import load_camera_params, apply_camera_params_to_estimator
-from segmentation_model import SegmentationModel  # New import for SAM
+from segmentation_model import SegmentationModel
 
 # Import supervision for visualization
 import supervision as sv
+
+def load_config(config_path):
+    """
+    Load configuration from a YAML file.
+    
+    Args:
+        config_path (str): Path to the configuration file
+        
+    Returns:
+        dict: Configuration dictionary
+    """
+    if not os.path.exists(config_path):
+        print(f"Warning: Configuration file {config_path} not found. Using default configuration.")
+        return {}
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        print(f"Loaded configuration from {config_path}")
+        return config
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+        return {}
 
 def main():
     """Main function."""
     # Add command-line argument parsing
     parser = argparse.ArgumentParser(description='YOLO-3D: 3D Object Detection with Segmentation')
-    parser.add_argument('--source', type=str, default='../Football/videos/08fd33_0.mp4', help='Path to input video file or webcam index')
+    parser.add_argument('--source', type=str, default='0', help='Path to input video file or webcam index')
     parser.add_argument('--output', type=str, default='output.mp4', help='Path to output video file')
     parser.add_argument('--skip-frames', type=int, default=0, help='Skip N frames between processing (0 to process all frames)')
     parser.add_argument('--no-sam', action='store_true', help='Disable SAM segmentation')
+    parser.add_argument('--config', type=str, default='config.yaml', help='Path to configuration file')
     args = parser.parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
     
     # Configuration variables (modify these as needed)
     # ===============================================
@@ -40,36 +68,46 @@ def main():
     output_path = args.output  # Path to output video file
     skip_frames = args.skip_frames  # Number of frames to skip between processing
     
-    # Model settings
-    yolo_model_size = "nano"  # YOLOv11 model size: "nano", "small", "medium", "large", "extra"
-    depth_model_size = "small"  # Depth Anything v2 model size: "small", "base", "large"
-    sam_model_size = "base"  # SAM model size: "base", "large"
+    # Model settings - can be overridden by config.yaml
+    yolo_model_size = config.get('models', {}).get('yolo_size', "nano")  # YOLOv11 model size: "nano", "small", "medium", "large", "extra"
+    depth_model_size = config.get('models', {}).get('depth_size', "small")  # Depth Anything v2 model size: "small", "base", "large"
+    sam_model_size = config.get('models', {}).get('sam_size', "base")  # SAM model size: "base", "large"
     
-    # Device settings
-    device = 'cuda'  # Force CUDA for performance
+    # Extract model paths from config
+    yolo_model_path = config.get('models', {}).get('yolo_path', None)
+    depth_model_path = config.get('models', {}).get('depth_path', None)
+    sam_model_path = config.get('models', {}).get('sam_path', None)
+    
+    # Device settings - default to CUDA
+    device = config.get('device', 'cuda')  
     
     # Detection settings
-    conf_threshold = 0.25  # Confidence threshold for object detection
-    iou_threshold = 0.45  # IoU threshold for NMS
-    classes = None  # Filter by class, e.g., [0, 1, 2] for specific classes, None for all classes
+    conf_threshold = config.get('detection', {}).get('conf_threshold', 0.25)  # Confidence threshold for object detection
+    iou_threshold = config.get('detection', {}).get('iou_threshold', 0.45)  # IoU threshold for NMS
+    classes = config.get('detection', {}).get('classes', None)  # Filter by class, e.g., [0, 1, 2] for specific classes, None for all classes
     
     # Feature toggles
-    enable_tracking = True  # Enable object tracking
-    enable_bev = False  # Enable Bird's Eye View visualization
-    enable_pseudo_3d = True  # Enable pseudo-3D visualization
-    enable_sam = not args.no_sam  # Enable SAM segmentation
+    enable_tracking = config.get('features', {}).get('tracking', True)  # Enable object tracking
+    enable_bev = config.get('features', {}).get('bev', False)  # Enable Bird's Eye View visualization
+    enable_pseudo_3d = config.get('features', {}).get('pseudo_3d', True)  # Enable pseudo-3D visualization
+    enable_sam = not args.no_sam and config.get('features', {}).get('sam', True)  # Enable SAM segmentation
     
-    # Camera parameters - simplified approach
-    camera_params_file = None  # Path to camera parameters file (None to use default parameters)
+    # Visualization settings
+    enable_visualization = config.get('visualization', {}).get('enable', False)  # Disable visualization by default
+    
+    # Camera parameters
+    camera_params_file = config.get('camera', {}).get('params_file', None)  # Path to camera parameters file
     # ===============================================
     
     print(f"Using device: {device}")
+    print(f"Model paths from config: YOLO={yolo_model_path}, Depth={depth_model_path}, SAM={sam_model_path}")
     
     # Initialize models
     print("Initializing models...")
     try:
         detector = ObjectDetector(
             model_size=yolo_model_size,
+            model_path=yolo_model_path,
             conf_thres=conf_threshold,
             iou_thres=iou_threshold,
             classes=classes,
@@ -80,6 +118,7 @@ def main():
         print("Falling back to CPU for object detection")
         detector = ObjectDetector(
             model_size=yolo_model_size,
+            model_path=yolo_model_path,
             conf_thres=conf_threshold,
             iou_thres=iou_threshold,
             classes=classes,
@@ -89,6 +128,7 @@ def main():
     try:
         depth_estimator = DepthEstimator(
             model_size=depth_model_size,
+            model_path=depth_model_path,
             device=device
         )
     except Exception as e:
@@ -96,6 +136,7 @@ def main():
         print("Falling back to CPU for depth estimation")
         depth_estimator = DepthEstimator(
             model_size=depth_model_size,
+            model_path=depth_model_path,
             device='cpu'
         )
     
@@ -104,6 +145,7 @@ def main():
         try:
             segmenter = SegmentationModel(
                 model_size=sam_model_size,
+                model_path=sam_model_path,
                 device=device
             )
         except Exception as e:
@@ -111,12 +153,18 @@ def main():
             print("Falling back to CPU for segmentation")
             segmenter = SegmentationModel(
                 model_size=sam_model_size,
+                model_path=sam_model_path,
                 device='cpu'
             )
     
     # Initialize 3D bounding box estimator with default parameters
-    # Simplified approach - focus on 2D detection with depth information
     bbox3d_estimator = BBox3DEstimator()
+    
+    # Load camera parameters if provided
+    if camera_params_file:
+        camera_params = load_camera_params(camera_params_file)
+        if camera_params:
+            bbox3d_estimator = apply_camera_params_to_estimator(bbox3d_estimator, camera_params)
     
     # Initialize Bird's Eye View if enabled
     if enable_bev:
@@ -157,17 +205,23 @@ def main():
     
     # Main loop
     while True:
-        # Check for key press at the beginning of each loop
-        key = cv2.waitKey(1)
-        if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
-            print("Exiting program...")
-            break
+        # Check for key press at the beginning of each loop (only if visualization is enabled)
+        if enable_visualization:
+            key = cv2.waitKey(1)
+            if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
+                print("Exiting program...")
+                break
             
         try:
             # Read frame
             ret, frame = cap.read()
             if not ret:
                 break
+            
+            # Skip frames if specified
+            if skip_frames > 0 and (frame_count % (skip_frames + 1) != 0):
+                frame_count += 1
+                continue
             
             # Make copies for different visualizations
             original_frame = frame.copy()
@@ -199,7 +253,7 @@ def main():
             
             # Step 3: SAM Segmentation (if enabled)
             segmentation_masks = []
-            if enable_sam and frame_count % (skip_frames + 1) == 0:  # Only process some frames
+            if enable_sam:
                 for detection in detections:
                     try:
                         bbox, score, class_id, obj_id = detection
@@ -346,8 +400,6 @@ def main():
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                 except Exception as e:
                     print(f"Error drawing BEV: {e}")
-                    if "'int' object has no attribute 'is_integer'" in str(e):
-                        print("This is a known issue. Please modify bbox3d_utils.py to check if dist == int(dist) instead of dist.is_integer()")
             
             # Calculate and display FPS
             frame_count += 1
@@ -378,32 +430,35 @@ def main():
             # Write frame to output video
             out.write(result_frame)
             
-            # Display frames - commented out for headless operation
-            # Uncomment for visual feedback during development
-            # cv2.imshow("3D Object Detection with Segmentation", result_frame)
-            # cv2.imshow("Depth Map", depth_colored)
-            # cv2.imshow("Object Detection", detection_frame)
+            # Display frames only if visualization is enabled
+            if enable_visualization:
+                cv2.imshow("3D Object Detection with Segmentation", result_frame)
+                cv2.imshow("Depth Map", depth_colored)
+                cv2.imshow("Object Detection", detection_frame)
             
-            # Check for key press again at the end of the loop
-            key = cv2.waitKey(1)
-            if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
-                print("Exiting program...")
-                break
+            # Check for key press again at the end of the loop (only if visualization is enabled)
+            if enable_visualization:
+                key = cv2.waitKey(1)
+                if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
+                    print("Exiting program...")
+                    break
         
         except Exception as e:
             print(f"Error processing frame: {e}")
-            # Also check for key press during exception handling
-            key = cv2.waitKey(1)
-            if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
-                print("Exiting program...")
-                break
+            # Also check for key press during exception handling (only if visualization is enabled)
+            if enable_visualization:
+                key = cv2.waitKey(1)
+                if key == ord('q') or key == 27 or (key & 0xFF) == ord('q') or (key & 0xFF) == 27:
+                    print("Exiting program...")
+                    break
             continue
     
     # Clean up
     print("Cleaning up resources...")
     cap.release()
     out.release()
-    cv2.destroyAllWindows()
+    if enable_visualization:
+        cv2.destroyAllWindows()
     
     print(f"Processing complete. Output saved to {output_path}")
 
@@ -412,5 +467,6 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nProgram interrupted by user (Ctrl+C)")
-        # Clean up OpenCV windows
-        cv2.destroyAllWindows()
+        # Clean up OpenCV windows (only if visualization is enabled)
+        if 'config' in locals() and config.get('visualization', {}).get('enable', False):
+            cv2.destroyAllWindows()

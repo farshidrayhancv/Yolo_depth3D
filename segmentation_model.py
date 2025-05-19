@@ -9,12 +9,13 @@ class SegmentationModel:
     """
     Object segmentation using SAM (Segment Anything Model) from Ultralytics
     """
-    def __init__(self, model_size='base', device=None):
+    def __init__(self, model_size='base', model_path=None, device=None):
         """
         Initialize the segmentation model
         
         Args:
             model_size (str): Model size ('base', 'large')
+            model_path (str): Direct path to a custom SAM model file (takes precedence over model_size)
             device (str): Device to run inference on ('cuda', 'cpu', 'mps')
         """
         # Determine device
@@ -41,12 +42,20 @@ class SegmentationModel:
             'large': 'sam_l.pt'
         }
         
-        model_name = model_map.get(model_size.lower(), model_map['base'])
+        # Determine which model to use
+        if model_path and os.path.exists(model_path):
+            model_name = model_path
+            print(f"Using custom SAM model from: {model_path}")
+        else:
+            if model_path:
+                print(f"Warning: Model path {model_path} not found, falling back to default model")
+            model_name = model_map.get(model_size.lower(), model_map['base'])
+            print(f"Using standard SAM {model_size} model")
         
         # Load model
         try:
             self.model = SAM(model_name)
-            print(f"Loaded SAM {model_size} model on {self.device}")
+            print(f"Loaded SAM model on {self.device}")
         except Exception as e:
             print(f"Error loading SAM model: {e}")
             print("Trying to load with default settings...")
