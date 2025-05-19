@@ -5,6 +5,7 @@ import time
 import cv2
 import numpy as np
 import torch
+import argparse
 from pathlib import Path
 
 # Set MPS fallback for operations not supported on Apple Silicon
@@ -16,22 +17,36 @@ from detection_model import ObjectDetector
 from depth_model import DepthEstimator
 from bbox3d_utils import BBox3DEstimator, BirdEyeView
 from load_camera_params import load_camera_params, apply_camera_params_to_estimator
+from segmentation_model import SegmentationModel  # New import for SAM
+
+# Import supervision for visualization
+import supervision as sv
 
 def main():
     """Main function."""
+    # Add command-line argument parsing
+    parser = argparse.ArgumentParser(description='YOLO-3D: 3D Object Detection with Segmentation')
+    parser.add_argument('--source', type=str, default='../Football/videos/08fd33_0.mp4', help='Path to input video file or webcam index')
+    parser.add_argument('--output', type=str, default='output.mp4', help='Path to output video file')
+    parser.add_argument('--skip-frames', type=int, default=0, help='Skip N frames between processing (0 to process all frames)')
+    parser.add_argument('--no-sam', action='store_true', help='Disable SAM segmentation')
+    args = parser.parse_args()
+    
     # Configuration variables (modify these as needed)
     # ===============================================
     
     # Input/Output
-    source = 0  # Path to input video file or webcam index (0 for default camera)
-    output_path = "output.mp4"  # Path to output video file
+    source = args.source  # Path to input video file or webcam index (0 for default camera)
+    output_path = args.output  # Path to output video file
+    skip_frames = args.skip_frames  # Number of frames to skip between processing
     
     # Model settings
     yolo_model_size = "nano"  # YOLOv11 model size: "nano", "small", "medium", "large", "extra"
     depth_model_size = "small"  # Depth Anything v2 model size: "small", "base", "large"
+    sam_model_size = "base"  # SAM model size: "base", "large"
     
     # Device settings
-    device = 'cpu'  # Force CPU for stability
+    device = 'cuda'  # Force CUDA for performance
     
     # Detection settings
     conf_threshold = 0.25  # Confidence threshold for object detection
@@ -40,8 +55,9 @@ def main():
     
     # Feature toggles
     enable_tracking = True  # Enable object tracking
-    enable_bev = True  # Enable Bird's Eye View visualization
+    enable_bev = False  # Enable Bird's Eye View visualization
     enable_pseudo_3d = True  # Enable pseudo-3D visualization
+    enable_sam = not args.no_sam  # Enable SAM segmentation
     
     # Camera parameters - simplified approach
     camera_params_file = None  # Path to camera parameters file (None to use default parameters)
@@ -82,6 +98,21 @@ def main():
             model_size=depth_model_size,
             device='cpu'
         )
+    
+    # Initialize SAM model if enabled
+    if enable_sam:
+        try:
+            segmenter = SegmentationModel(
+                model_size=sam_model_size,
+                device=device
+            )
+        except Exception as e:
+            print(f"Error initializing segmentation model: {e}")
+            print("Falling back to CPU for segmentation")
+            segmenter = SegmentationModel(
+                model_size=sam_model_size,
+                device='cpu'
+            )
     
     # Initialize 3D bounding box estimator with default parameters
     # Simplified approach - focus on 2D detection with depth information
@@ -143,6 +174,7 @@ def main():
             detection_frame = frame.copy()
             depth_frame = frame.copy()
             result_frame = frame.copy()
+            segmentation_frame = frame.copy() if enable_sam else None
             
             # Step 1: Object Detection
             try:
@@ -165,7 +197,45 @@ def main():
                 cv2.putText(depth_colored, "Depth Error", (10, 60), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
-            # Step 3: 3D Bounding Box Estimation
+            # Step 3: SAM Segmentation (if enabled)
+            segmentation_masks = []
+            if enable_sam and frame_count % (skip_frames + 1) == 0:  # Only process some frames
+                for detection in detections:
+                    try:
+                        bbox, score, class_id, obj_id = detection
+                        
+                        # Skip low confidence detections for segmentation 
+                        if score < conf_threshold + 0.1:  # Higher threshold for SAM
+                            continue
+                            
+                        # Get class name
+                        class_name = detector.get_class_names()[class_id]
+                        
+                        # Run SAM on the bounding box
+                        mask, colored_mask = segmenter.segment_bbox(
+                            original_frame, 
+                            bbox, 
+                            class_id,
+                            class_name
+                        )
+                        
+                        if mask is not None:
+                            # Store mask and its metadata
+                            segmentation_masks.append({
+                                'mask': mask,
+                                'bbox': bbox,
+                                'class_id': class_id,
+                                'class_name': class_name,
+                                'object_id': obj_id
+                            })
+                            
+                            # Apply the colored mask to the segmentation frame
+                            segmentation_frame = colored_mask  # Use the already colored result
+                    except Exception as e:
+                        print(f"Error processing segmentation for detection: {e}")
+                        continue
+            
+            # Step 4: 3D Bounding Box Estimation
             boxes_3d = []
             active_ids = []
             
@@ -211,7 +281,11 @@ def main():
             # Clean up trackers for objects that are no longer detected
             bbox3d_estimator.cleanup_trackers(active_ids)
             
-            # Step 4: Visualization
+            # Step 5: Visualization
+            # Use segmentation frame as the result frame if SAM is enabled
+            if enable_sam and segmentation_frame is not None:
+                result_frame = segmentation_frame
+            
             # Draw boxes on the result frame
             for box_3d in boxes_3d:
                 try:
@@ -225,6 +299,8 @@ def main():
                         color = (255, 0, 0)  # Blue
                     elif 'potted plant' in class_name or 'plant' in class_name:
                         color = (0, 255, 255)  # Yellow
+                    elif 'sports ball' in class_name or 'ball' in class_name:
+                        color = (0, 165, 255)  # Orange
                     else:
                         color = (255, 255, 255)  # White
                     
@@ -244,7 +320,7 @@ def main():
                     bev_image = bev.get_image()
                     
                     # Resize BEV image to fit in the corner of the result frame
-                    bev_height = height // 4  # Reduced from height/3 to height/4 for better fit
+                    bev_height = height // 4  # Reduced for better fit
                     bev_width = bev_height
                     
                     # Ensure dimensions are valid
@@ -270,6 +346,8 @@ def main():
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                 except Exception as e:
                     print(f"Error drawing BEV: {e}")
+                    if "'int' object has no attribute 'is_integer'" in str(e):
+                        print("This is a known issue. Please modify bbox3d_utils.py to check if dist == int(dist) instead of dist.is_integer()")
             
             # Calculate and display FPS
             frame_count += 1
@@ -283,6 +361,10 @@ def main():
             cv2.putText(result_frame, f"{fps_display} | Device: {device}", (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
+            # Add info about SAM
+            if enable_sam:
+                cv2.putText(result_frame, "SAM Segmentation: ON", (10, 60), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
             # Add depth map to the corner of the result frame
             try:
@@ -296,10 +378,11 @@ def main():
             # Write frame to output video
             out.write(result_frame)
             
-            # Display frames
-            cv2.imshow("3D Object Detection", result_frame)
-            cv2.imshow("Depth Map", depth_colored)
-            cv2.imshow("Object Detection", detection_frame)
+            # Display frames - commented out for headless operation
+            # Uncomment for visual feedback during development
+            # cv2.imshow("3D Object Detection with Segmentation", result_frame)
+            # cv2.imshow("Depth Map", depth_colored)
+            # cv2.imshow("Object Detection", detection_frame)
             
             # Check for key press again at the end of the loop
             key = cv2.waitKey(1)
@@ -330,4 +413,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nProgram interrupted by user (Ctrl+C)")
         # Clean up OpenCV windows
-        cv2.destroyAllWindows() 
+        cv2.destroyAllWindows()

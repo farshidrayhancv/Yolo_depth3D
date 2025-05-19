@@ -673,7 +673,7 @@ class BirdEyeView:
                     (120, 120, 120), thickness)
             
             # Only show text for whole meters
-            if dist.is_integer():
+            if dist == int(dist):
                 cv2.putText(self.bev_image, f"{int(dist)}m", 
                            (self.origin_x + 10, y + 4), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
