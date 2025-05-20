@@ -5,7 +5,7 @@
 models:
   # YOLO detector settings
   yolo_size: "nano"  # Model size if path not provided (options: nano, small, medium, large, extra)
-  yolo_path: "models/1024_1024_mosaic pre.pt"  # Path to the custom YOLO model file
+  yolo_path: "models/yolo3d.pt"  # Path to the custom YOLO model file
   
   # Depth estimation settings
   depth_size: "small"  # Model size if path not provided (options: small, base, large)
@@ -23,7 +23,7 @@ detection:
   conf_threshold: 0.25  # Confidence threshold for object detection
   iou_threshold: 0.45  # IoU threshold for NMS
   classes: null  # Filter by class IDs, null for all classes
-  image_size: [1088, 1088]  # Image processing size [width, height] for detection model
+  image_size: [640, 640]  # Image processing size [width, height] for detection model
 
 # Depth settings
 depth:
@@ -39,7 +39,7 @@ tracking:
 
 # Feature toggles
 features:
-  tracking: true  # Enable object tracking
+  tracking: false  # Enable object tracking
   bev: false  # Enable Bird's Eye View visualization
   pseudo_3d: true  # Enable pseudo-3D visualization
   sam: true  # Enable SAM segmentation
