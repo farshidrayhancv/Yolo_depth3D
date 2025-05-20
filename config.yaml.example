@@ -1,0 +1,60 @@
+# YOLO-3D Configuration
+# This configuration file allows you to customize model paths and settings
+
+# Model configuration
+models:
+  # YOLO detector settings
+  yolo_size: "nano"  # Model size if path not provided (options: nano, small, medium, large, extra)
+  yolo_path: "models/yolo11n_320.pt"  # Path to the custom YOLO model file
+  
+  # Depth estimation settings
+  depth_size: "small"  # Model size if path not provided (options: small, base, large)
+  depth_path: "models/depth_anything.pt"  # Path to the custom depth model file
+  
+  # SAM segmentation settings
+  sam_size: "base"  # Model size if path not provided (options: base, large)
+  sam_path: "models/sam_b.pt"  # Path to the custom SAM model file
+
+# Device settings
+device: "cuda"  # Use CUDA by default (options: cuda, cpu, mps)
+
+# Detection settings
+detection:
+  conf_threshold: 0.25  # Confidence threshold for object detection
+  iou_threshold: 0.45  # IoU threshold for NMS
+  classes: null  # Filter by class IDs, null for all classes
+  image_size: [640, 640]  # Image processing size [width, height] for detection model
+
+# Depth settings
+depth:
+  image_size: [640, 640]  # Image processing size [width, height] for depth model
+
+# Tracking settings
+tracking:
+  lost_track_buffer: 0.25  # Detection threshold for tracking
+  track_activation_threshold: 30  # How many frames to keep in the buffer
+  minimum_matching_threshold: 0.8  # IoU matching threshold for tracking
+  filter_config:
+    length: 5  # The maximum number of frames to consider for smoothing detections
+
+# Feature toggles
+features:
+  tracking: true  # Enable object tracking
+  bev: false  # Enable Bird's Eye View visualization
+  pseudo_3d: true  # Enable pseudo-3D visualization
+  sam: true  # Enable SAM segmentation
+
+# Visualization settings
+visualization:
+  enable: false  # Disable OpenCV visualization by default
+  depth_map: false  # Show depth map window
+  detection: false  # Show detection frame window
+
+# Camera settings
+camera:
+  params_file: null  # Path to camera parameters file (null to use default parameters)
+
+# Processing settings
+processing:
+  skip_frames: 0  # Number of frames to skip between processing (0 to process all frames)
+  show_progress: true  # Show progress bar during processing
