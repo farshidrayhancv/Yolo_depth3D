@@ -2,13 +2,13 @@
 
 <div align="center">
   <p>
-    <a href="https://github.com/niconielsen32/YOLO-3D" target="_blank">
+    <a href="https://github.com/farshidrayhancv/Yolo_depth3D" target="_blank">
       <img width="100%" src="https://raw.githubusercontent.com/ultralytics/assets/main/yolov8/banner-yolov8.png"></a>
   </p>
 
   <a href="https://www.python.org/downloads/"><img alt="Python" src="https://img.shields.io/badge/Python->=3.8-blue.svg"></a>
   <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch->=2.0-orange.svg"></a>
-  <a href="https://github.com/niconielsen32/YOLO-3D/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+  <a href="https://github.com/farshidrayhancv/Yolo_depth3D/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
 </div>
 
 ## Overview
@@ -28,8 +28,7 @@ YOLO-3D is a cutting-edge real-time 3D object detection system that integrates Y
 
 ## Architecture and Pipeline
 
-Top pipeline
-
+```mermaid
 flowchart TB
     subgraph Input
         A[Video/Camera Input] --> B[Frame Extraction]
@@ -80,6 +79,109 @@ flowchart TB
     class C,D,E,F,I,J,K,L primary
     class G,H,M,N optional
     class O,P output
+```
+
+## Detailed Architecture
+
+```mermaid
+flowchart TD
+    A[Input Source] --> B[run.py]
+    
+    subgraph Core Components
+        B --> C[detection_model.py\nYOLOv11 + ByteTracker]
+        B --> D[depth_model.py\nDepth Anything v2]
+        B --> E[segmentation_model.py\nSAM]
+        B --> F[bbox3d_utils.py]
+        
+        G[load_camera_params.py] --> F
+    end
+    
+    subgraph BBox3D Module
+        F --> H[BBox3DEstimator]
+        F --> I[BirdEyeView]
+        
+        H --> J[estimate_3d_box]
+        H --> K[project_box_3d_to_2d]
+        H --> L[draw_box_3d]
+        
+        I --> M[reset]
+        I --> N[draw_box]
+        I --> O[get_image]
+    end
+    
+    subgraph Detection Pipeline
+        C --> P[YOLO Models]
+        P --> |nano|P1[yolo11n]
+        P --> |small|P2[yolo11s]
+        P --> |medium|P3[yolo11m]
+        P --> |large|P4[yolo11l]
+        P --> |extra|P5[yolo11x]
+        
+        C --> Q[ByteTracker]
+        C --> R[DetectionsSmoother]
+    end
+    
+    subgraph Depth Pipeline
+        D --> S[Depth Models]
+        S --> |small|S1[Depth-Anything-V2-Small]
+        S --> |base|S2[Depth-Anything-V2-Base]
+        S --> |large|S3[Depth-Anything-V2-Large]
+    end
+    
+    subgraph Segmentation Pipeline
+        E --> T[SAM Models]
+        T --> |base|T1[sam_b.pt]
+        T --> |large|T2[sam_l.pt]
+    end
+    
+    B --> U[Output Video]
+    
+    classDef main fill:#f9d5e5,stroke:#333,stroke-width:2px
+    classDef module fill:#d5e5f9,stroke:#333,stroke-width:1px
+    classDef function fill:#e5f9d5,stroke:#333,stroke-width:1px
+    classDef model fill:#f9e5d5,stroke:#333,stroke-width:1px
+    
+    class A,B,U main
+    class C,D,E,F,G,H,I module
+    class J,K,L,M,N,O function
+    class P,P1,P2,P3,P4,P5,Q,R,S,S1,S2,S3,T,T1,T2 model
+```
+
+## 3D Box Estimation Process
+
+```mermaid
+sequenceDiagram
+    participant Input as Input Image
+    participant Det as Object Detector (YOLOv11)
+    participant Depth as Depth Estimator (Depth Anything v2)
+    participant BB3D as 3D Box Estimator
+    participant Vis as Visualization
+
+    Input->>Det: Process frame
+    Det->>Det: Detect objects
+    Det->>BB3D: 2D bounding boxes [x1,y1,x2,y2]
+    
+    Input->>Depth: Process frame
+    Depth->>Depth: Generate depth map
+    Depth->>BB3D: Depth information
+    
+    BB3D->>BB3D: For each object detection
+    BB3D->>BB3D: Get depth value in region
+    BB3D->>BB3D: Estimate object dimensions
+    BB3D->>BB3D: Calculate 3D location
+    BB3D->>BB3D: Estimate orientation
+    BB3D->>BB3D: Create 3D bounding box
+    BB3D->>BB3D: Apply Kalman filtering (if tracking enabled)
+    
+    BB3D->>Vis: 3D bounding boxes
+    BB3D->>Vis: Bird's Eye View data (optional)
+    
+    Vis->>Vis: Draw 3D boxes
+    Vis->>Vis: Generate Bird's Eye View (optional)
+    Vis->>Vis: Create result frame
+    
+    Note over Input,Vis: Optional: SAM segmentation can be applied after detection
+```
 
 ## Installation
 
@@ -144,6 +246,88 @@ features:
 ```
 
 ## How It Works
+
+```python
+import cv2
+from detection_model import ObjectDetector
+from depth_model import DepthEstimator
+from bbox3d_utils import BBox3DEstimator, BirdEyeView
+
+# Initialize models
+detector = ObjectDetector(model_size="small", device="cuda")
+depth_estimator = DepthEstimator(model_size="small", device="cuda")
+bbox3d_estimator = BBox3DEstimator()
+bev = BirdEyeView(scale=60, size=(300, 300))
+
+# Open video source
+cap = cv2.VideoCapture(0)  # Use camera
+
+while True:
+    # Read frame
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Step 1: Object Detection
+    detection_frame, detections = detector.detect(frame.copy(), track=True)
+    
+    # Step 2: Depth Estimation
+    depth_map = depth_estimator.estimate_depth(frame)
+    
+    # Step 3: 3D Bounding Box Estimation
+    boxes_3d = []
+    active_ids = []
+    for detection in detections:
+        bbox, score, class_id, obj_id = detection
+        
+        # Get class name
+        class_name = detector.get_class_names()[class_id]
+        
+        # Get depth in the region of the bounding box
+        depth_value = depth_estimator.get_depth_in_region(depth_map, bbox, method='median')
+        
+        # Create 3D box
+        box_3d = {
+            'bbox_2d': bbox,
+            'depth_value': depth_value,
+            'class_name': class_name,
+            'object_id': obj_id,
+            'score': score
+        }
+        boxes_3d.append(box_3d)
+        
+        if obj_id is not None:
+            active_ids.append(obj_id)
+    
+    # Clean up trackers for objects no longer in frame
+    bbox3d_estimator.cleanup_trackers(active_ids)
+    
+    # Step 4: Visualization
+    result_frame = frame.copy()
+    for box_3d in boxes_3d:
+        result_frame = bbox3d_estimator.draw_box_3d(result_frame, box_3d)
+    
+    # Generate Bird's Eye View
+    bev.reset()
+    for box_3d in boxes_3d:
+        bev.draw_box(box_3d)
+    bev_image = bev.get_image()
+    
+    # Add BEV to corner of result frame
+    bev_height = result_frame.shape[0] // 4
+    bev_width = bev_height
+    bev_resized = cv2.resize(bev_image, (bev_width, bev_height))
+    result_frame[result_frame.shape[0] - bev_height:, 0:bev_width] = bev_resized
+    
+    # Display result
+    cv2.imshow("YOLO-3D", result_frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Clean up
+cap.release()
+cv2.destroyAllWindows()
+```
 
 YOLO-3D works by combining state-of-the-art models and techniques to create a comprehensive 3D understanding from 2D video inputs:
 
