@@ -28,6 +28,59 @@ YOLO-3D is a cutting-edge real-time 3D object detection system that integrates Y
 
 ## Architecture and Pipeline
 
+Top pipeline
+
+flowchart TB
+    subgraph Input
+        A[Video/Camera Input] --> B[Frame Extraction]
+    end
+    
+    subgraph Detection
+        B --> C[YOLOv11\nObject Detection]
+        C --> D[2D Bounding Boxes]
+    end
+    
+    subgraph Depth
+        B --> E[Depth Anything v2]
+        E --> F[Depth Map]
+    end
+    
+    subgraph Optional["Optional Processing"]
+        B --> G[SAM Segmentation]
+        G --> H[Object Masks]
+    end
+    
+    subgraph Processing
+        D --> I[3D Box Estimation]
+        F --> I
+        I --> J[3D Bounding Boxes]
+        
+        D --> K[Object Tracking]
+        K --> L[Tracked Objects]
+        
+        J --> M[Bird's Eye View\nGeneration]
+        L --> M
+        M --> N[BEV Visualization]
+    end
+    
+    subgraph Output
+        J --> O[3D Visualization]
+        H --> O
+        N --> O
+        O --> P[Output Video]
+    end
+    
+    classDef primary fill:#f9d5e5,stroke:#333,stroke-width:2px
+    classDef secondary fill:#eeeeee,stroke:#333,stroke-width:1px
+    classDef optional fill:#d5f9e5,stroke:#333,stroke-width:1px
+    classDef input fill:#d5e5f9,stroke:#333,stroke-width:2px
+    classDef output fill:#f9e5d5,stroke:#333,stroke-width:2px
+    
+    class A,B input
+    class C,D,E,F,I,J,K,L primary
+    class G,H,M,N optional
+    class O,P output
+
 ## Installation
 
 1. Clone the repository:
