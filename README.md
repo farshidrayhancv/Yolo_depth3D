@@ -32,7 +32,7 @@ YOLO-3D is a cutting-edge real-time 3D object detection system that integrates Y
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/niconielsen32/YOLO-3D.git
+git clone https://github.com/farshidrayhancv/Yolo_depth3D.git
 cd YOLO-3D
 ```
 
